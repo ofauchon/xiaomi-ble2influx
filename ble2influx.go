@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"os/user"
@@ -45,6 +44,7 @@ var (
 	dropuser            = flag.String("user", "default", "Drop privileges to <user>")
 	device              = flag.String("device", "", "implementation of ble")
 	sensors_descriptor  = flag.String("desc", "~/.config/ble2influx/sensors.json", "Sensors descriptor file")
+	logfile             = flag.String("log", "", "Path to log file. stdout if unused")
 	influx_only_connect = flag.Bool("influx-only-connect", false, "Connect InfluxDB without pushing metrics")
 	period              = flag.Int("period", 60, "Duration (in sec) between two influxdB metrics updates")
 	debug               = flag.Int("debug", 0, "0 none, 1->3 to enable with more or less verbosity ")
@@ -102,31 +102,31 @@ func decodeMijia(dat []byte) (*MijiaMetrics, error) {
 func chuser(username string) (uid, gid int) {
 	usr, err := user.Lookup(username)
 	if err != nil {
-		fmt.Printf("failed to find user %q: %s\n", username, err)
+		log.Printf("failed to find user %q: %s\n", username, err)
 		os.Exit(3)
 	}
 
 	uid, err = strconv.Atoi(usr.Uid)
 
 	if err != nil {
-		fmt.Printf("bad user ID %q: %s\n", usr.Uid, err)
+		log.Printf("bad user ID %q: %s\n", usr.Uid, err)
 		os.Exit(3)
 	}
 
 	gid, err = strconv.Atoi(usr.Gid)
 
 	if err != nil {
-		fmt.Printf("bad group ID %q: %s", usr.Gid, err)
+		log.Printf("bad group ID %q: %s", usr.Gid, err)
 		os.Exit(3)
 	}
 
 	if err := syscall.Setgid(gid); err != nil {
-		fmt.Printf("setgid(%d): %s", gid, err)
+		log.Printf("setgid(%d): %s", gid, err)
 		os.Exit(3)
 	}
 
 	if err := syscall.Setuid(uid); err != nil {
-		fmt.Printf("setuid(%d): %s", uid, err)
+		log.Printf("setuid(%d): %s", uid, err)
 		os.Exit(3)
 	}
 
@@ -139,16 +139,16 @@ func chuser(username string) (uid, gid int) {
  */
 func influxSender(metrics map[[6]byte]*MijiaMetrics, dryRun bool) {
 
-	fmt.Println("influxSender: Start loop")
+	log.Println("influxSender: Start loop")
 	cnt := int(0)
 	for {
 		cnt = 0
 		if dryRun == true {
-			fmt.Println("Sending influxdb metrics disabled (only_connect) ")
+			log.Println("Sending influxdb metrics disabled (only_connect) ")
 			continue
 		}
 
-		fmt.Println("influxSender: Metrics queue length:", len(metrics))
+		log.Println("influxSender: Metrics queue length:", len(metrics))
 		for mac, data := range metrics {
 			hs := hex.EncodeToString(data.Mac[:])
 
@@ -161,7 +161,7 @@ func influxSender(metrics map[[6]byte]*MijiaMetrics, dryRun bool) {
 			}
 
 			if *debug > 0 {
-				fmt.Printf("TX %s: Name:%s Rssi:%d Temp:%.2f Humi:%.2f Batt:%.2f Frame:%d\n", hs, dName, data.RSSI, data.Temp, data.Humi, data.Batt, data.FrameCount)
+				log.Printf("TX %s: Name:%s Rssi:%d Temp:%.2f Humi:%.2f Batt:%.2f Frame:%d\n", hs, dName, data.RSSI, data.Temp, data.Humi, data.Batt, data.FrameCount)
 			}
 			p := influxdb2.NewPoint(*influx_measurement,
 				map[string]string{"type": "mijia", "source": hs},
@@ -169,7 +169,7 @@ func influxSender(metrics map[[6]byte]*MijiaMetrics, dryRun bool) {
 			cnt++
 			err := writeAPI.WritePoint(context.Background(), p)
 			if err != nil {
-				fmt.Println("influxSender: Error TX :", err)
+				log.Println("influxSender: Error TX :", err)
 			}
 			lockMetrics.Lock()
 			delete(metrics, mac)
@@ -178,9 +178,9 @@ func influxSender(metrics map[[6]byte]*MijiaMetrics, dryRun bool) {
 		//writeAPI.Flush()
 		lastUpload = time.Now()
 
-		fmt.Println("influxSender: Sleep")
+		log.Println("influxSender: Sleep")
 		time.Sleep(time.Duration(*period) * time.Second)
-		fmt.Println("influxSender: Sent ", cnt, " measurements, now sleeping ", *period, "sec.")
+		log.Println("influxSender: Sent ", cnt, " measurements, now sleeping ", *period, "sec.")
 	}
 }
 
@@ -188,9 +188,9 @@ func chkErr(err error) {
 	switch errors.Cause(err) {
 	case nil:
 	case context.DeadlineExceeded:
-		fmt.Printf("done\n")
+		log.Printf("done\n")
 	case context.Canceled:
-		fmt.Printf("canceled\n")
+		log.Printf("canceled\n")
 	default:
 		log.Fatalf(err.Error())
 	}
@@ -203,17 +203,17 @@ func advHandler(a ble.Advertisement) {
 
 	// Dump received frame
 	if *debug > 1 {
-		fmt.Println("vvvvv-------------------")
-		fmt.Printf("  Found device: %s\n", a.Addr())
-		fmt.Printf("  Local Name: %s\n", a.LocalName())
-		fmt.Printf("  RSSI: %d\n", a.RSSI())
-		fmt.Printf("  Manufacturer Data: %x\n", a.ManufacturerData())
-		fmt.Printf("  Service UUIDs: %v\n\n", a.Services())
-		fmt.Printf("  Service DATA: %v\n\n", a.ServiceData())
-		fmt.Println("~~~~~-------------------")
+		log.Println("vvvvv-------------------")
+		log.Printf("  Found device: %s\n", a.Addr())
+		log.Printf("  Local Name: %s\n", a.LocalName())
+		log.Printf("  RSSI: %d\n", a.RSSI())
+		log.Printf("  Manufacturer Data: %x\n", a.ManufacturerData())
+		log.Printf("  Service UUIDs: %v\n\n", a.Services())
+		log.Printf("  Service DATA: %v\n\n", a.ServiceData())
+		log.Println("~~~~~-------------------")
 		s := spew.Sdump(a)
-		fmt.Println(s)
-		fmt.Println("^^^^^-------------------")
+		log.Println(s)
+		log.Println("^^^^^-------------------")
 
 	}
 	if strings.HasPrefix(a.LocalName(), "ATC_") && len(a.ServiceData()) > 0 {
@@ -222,7 +222,7 @@ func advHandler(a ble.Advertisement) {
 			// Discard if it's not Mijia (0x181a)
 			if !svc.UUID.Equal(ble.UUID16(0x181a)) {
 				if *debug > 2 {
-					fmt.Println("Skipping UUID", svc.UUID)
+					log.Println("Skipping UUID", svc.UUID)
 				}
 				continue
 			}
@@ -232,7 +232,7 @@ func advHandler(a ble.Advertisement) {
 			if err == nil {
 				hs := hex.EncodeToString(mi.Mac[:])
 				if *debug > 0 {
-					fmt.Printf("RX: MIJIA: %s: Rssi:%d Temp:%.2f Humi:%.2f Batt:%.2f Frame:%d\n", hs, a.RSSI(), mi.Temp, mi.Humi, mi.Batt, mi.FrameCount)
+					log.Printf("RX: MIJIA: %s: Rssi:%d Temp:%.2f Humi:%.2f Batt:%.2f Frame:%d\n", hs, a.RSSI(), mi.Temp, mi.Humi, mi.Batt, mi.FrameCount)
 				}
 				mi.RSSI = a.RSSI()
 				lockMetrics.Lock()
@@ -240,7 +240,7 @@ func advHandler(a ble.Advertisement) {
 				lockMetrics.Unlock()
 
 			} else {
-				fmt.Println("Error decoding frame:", err)
+				log.Println("Error decoding frame:", err)
 			}
 
 		}
@@ -250,16 +250,27 @@ func advHandler(a ble.Advertisement) {
 
 // MAIN
 func main() {
-	fmt.Println("Starting ble2influx")
+	log.Println("Starting ble2influx")
 	flag.Parse()
 
-	fmt.Println("Creating BLE device")
+	// Set log file
+	if len(*logfile) > 0 {
+		log.Println("Log file set to: ", *logfile)
+		f, err := os.OpenFile(*logfile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0600)
+		if err == nil {
+			log.SetOutput(f)
+		} else {
+			log.Fatal("Can't open log file:", *logfile, ":", err)
+		}
+	}
+
+	log.Println("Creating BLE device")
 	d, err := dev.NewDevice(*device)
 	if err != nil {
 		log.Fatalf("can't new device : %s", err)
 	}
 
-	//fmt.Println("Switching to ", *dropuser, " user")
+	//log.Println("Switching to ", *dropuser, " user")
 	//chuser(*dropuser)
 
 	// Try to read default
@@ -268,9 +279,9 @@ func main() {
 		dirname, _ := os.UserHomeDir()
 		descFile = filepath.Join(dirname, descFile[2:])
 	}
-	fmt.Println("Trying to load sensor descriptor: ", descFile)
+	log.Println("Trying to load sensor descriptor: ", descFile)
 	if _, err := os.Stat(descFile); err == nil {
-		fmt.Println("Using json sensor descriptor file ", descFile)
+		log.Println("Using json sensor descriptor file ", descFile)
 
 		dat, err := os.ReadFile(descFile)
 		if err != nil {
@@ -278,23 +289,23 @@ func main() {
 		}
 
 		// Try to read default json sensors configuration
-		fmt.Println("Trying to load sensor descriptor: ", *sensors_descriptor)
+		log.Println("Trying to load sensor descriptor: ", *sensors_descriptor)
 		if _, err := os.Stat(*sensors_descriptor); err == nil {
-			fmt.Println("Using json sensor descriptor file ", sensors_descriptor)
+			log.Println("Using json sensor descriptor file ", sensors_descriptor)
 
 			// Mijia configuration json
 			err = json.Unmarshal(dat, &mijiaConfig)
 			if err != nil {
 				log.Fatalf("Can't parse json file :", err)
 			}
-			fmt.Println("Mijia json configuration : ", len(mijiaConfig), " entries found")
+			log.Println("Mijia json configuration : ", len(mijiaConfig), " entries found")
 		} else {
-			fmt.Println("No sensor descriptor json ", descFile, " ", err)
+			log.Println("No sensor descriptor json ", descFile, " ", err)
 		}
 	}
 	//InfluxDB connection
-	fmt.Println("Connecting to influxDB server")
-	fmt.Println("  server", *influx_server, " bucket:", *influx_bucket, " org:", *influx_org)
+	log.Println("Connecting to influxDB server")
+	log.Println("  server", *influx_server, " bucket:", *influx_bucket, " org:", *influx_org)
 	ble.SetDefaultDevice(d)
 	client = influxdb2.NewClient(*influx_server, *influx_token)
 	defer client.Close()
@@ -304,7 +315,7 @@ func main() {
 	go influxSender(lastMetrics, *influx_only_connect)
 
 	// Scan forever, or until interrupted by user.
-	fmt.Println("Starting BLE Advertisement Listener")
+	log.Println("Starting BLE Advertisement Listener")
 	ctx := ble.WithSigHandler(context.Background(), nil)
 	chkErr(ble.Scan(ctx, true, advHandler, nil))
 }
