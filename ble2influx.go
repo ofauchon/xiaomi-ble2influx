@@ -52,6 +52,7 @@ type Configuration struct {
 	debugLevel         int
 	logFile            string
 	device             string
+	unprivUser         string
 }
 
 var (
@@ -259,6 +260,7 @@ func parseConfig(path string) error {
 	}
 	config.logFile = cfg.Section("").Key("logFile").String()
 	config.device = cfg.Section("").Key("device").String()
+	config.unprivUser = cfg.Section("").Key("user").String()
 
 	config.influx_url = cfg.Section("influx").Key("url").String()
 	config.influx_bucket = cfg.Section("influx").Key("bucket").String()
@@ -284,9 +286,8 @@ func main() {
 	configFile = flag.String("config", ".ble2influx.conf", "Configuration file")
 	dryrun = flag.Bool("dryrun", false, "Dry Run (listen BT but don't send to influxDB)")
 	flag.Parse()
-
-	println("  configFile: ", *configFile)
-	println("  dryrun: ", *dryrun)
+	println(" - configFile: ", *configFile)
+	println(" - dryrun: ", *dryrun)
 
 	// Read configuration file, exit if not found
 	err := parseConfig(*configFile)
@@ -306,14 +307,18 @@ func main() {
 		}
 	}
 
-	log.Println("Creating BLE device")
-	d, err := dev.NewDevice("")
+	log.Println("Opening BLE device")
+	bleDevice, err := dev.NewDevice("")
 	if err != nil {
 		log.Fatalf("can't new device : %s", err)
 	}
+	ble.SetDefaultDevice(bleDevice)
 
-	//log.Println("Switching to ", *dropuser, " user")
-	//chuser(*dropuser)
+	// Drop privileges
+	if len(config.unprivUser) > 0 {
+		log.Println("*** Switching to user", config.unprivUser)
+		chuser(config.unprivUser)
+	}
 
 	/*
 		// Try to read default
@@ -349,11 +354,11 @@ func main() {
 
 	*/
 	//InfluxDB connection
-	log.Println("Connecting to influxDB server")
+	log.Println("InfluxDB server configuration:")
 	log.Println("  - server:", config.influx_url, ",bucket:", config.influx_bucket)
 	log.Println("  - org:", config.influx_org, ",measurement:", config.influx_measurement)
 	log.Println("  - apikey:", config.influx_token)
-	ble.SetDefaultDevice(d)
+
 	client = influxdb2.NewClient(config.influx_url, config.influx_token)
 	defer client.Close()
 	writeAPI = client.WriteAPIBlocking(config.influx_org, config.influx_bucket)
