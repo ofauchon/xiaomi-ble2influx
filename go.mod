@@ -7,6 +7,7 @@ require (
 	github.com/go-ble/ble v0.0.0-20240122180141-8c5522f54333
 	github.com/influxdata/influxdb-client-go/v2 v2.14.0
 	github.com/pkg/errors v0.9.1
+	gopkg.in/ini.v1 v1.67.0
 )
 
 require (
