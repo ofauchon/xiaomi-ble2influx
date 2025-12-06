@@ -320,6 +320,11 @@ func main() {
 		}
 	}
 
+	log.Println("Global configuration:")
+	log.Println("	debugLevel:", config.debugLevel)
+	log.Println("	logFile:", config.logFile)
+	log.Println("	dropUser:", config.unprivUser)
+
 	log.Println("Opening BLE device")
 	bleDevice, err := dev.NewDevice("")
 	if err != nil {
