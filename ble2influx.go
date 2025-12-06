@@ -203,7 +203,7 @@ func chkErr(err error) {
 func advHandler(a ble.Advertisement) {
 
 	// Dump received frame
-	if config.debugLevel > 1 {
+	if config.debugLevel > 2 {
 		log.Println("vvvvv-------------------")
 		log.Printf("  Found device: %s\n", a.Addr())
 		log.Printf("  Local Name: %s\n", a.LocalName())
