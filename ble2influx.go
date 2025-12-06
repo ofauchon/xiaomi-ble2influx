@@ -53,16 +53,18 @@ type Configuration struct {
 	logFile            string
 	device             string
 	unprivUser         string
+	mapping            map[string]string
 }
 
 var (
 	configFile *string
 	dryrun     *bool
-	config     Configuration
+	config     *Configuration
 
 	mijiaConfig = make([]MijiaDeviceConfig, 0)
-	client      influxdb2.Client
-	writeAPI    influxdb2api.WriteAPIBlocking
+
+	client   influxdb2.Client
+	writeAPI influxdb2api.WriteAPIBlocking
 	// Map for latest measurement and its Mutex
 	lastMetrics = make(map[[6]byte]*MijiaMetrics)
 	lockMetrics = sync.RWMutex{}
@@ -142,33 +144,34 @@ func influxSender(metrics map[[6]byte]*MijiaMetrics, dryRun bool) {
 	cnt := int(0)
 	for {
 		cnt = 0
-		if dryRun {
-			log.Println("Sending influxdb metrics disabled (only_connect) ")
-			continue
-		}
 
 		log.Println("influxSender: Metrics queue length:", len(metrics))
 		for mac, data := range metrics {
 			hs := hex.EncodeToString(data.Mac[:])
 
-			// Get name from json config
-			dName := "unknown"
-			for _, s := range mijiaConfig {
-				if s.Mac == hs {
-					dName = s.Name
+			// Get name from mapping
+			dAlias := "unknown"
+			for k, v := range config.mapping {
+				if hs == k {
+					dAlias = v
 				}
 			}
 
 			if config.debugLevel > 1 {
-				log.Printf("influxSender: Add point: id:%s: Name:%s Rssi:%d Temp:%.2f Humi:%.2f Batt:%.2f Frame:%d\n", hs, dName, data.RSSI, data.Temp, data.Humi, data.Batt, data.FrameCount)
+				log.Printf("influxSender: Add point: id:%s: Alias:%s Rssi:%d Temp:%.2f Humi:%.2f Batt:%.2f Frame:%d\n", hs, dAlias, data.RSSI, data.Temp, data.Humi, data.Batt, data.FrameCount)
 			}
 			p := influxdb2.NewPoint(config.influx_measurement,
-				map[string]string{"type": "mijia", "source": hs},
-				map[string]interface{}{"rssi": data.RSSI, "temp": data.Temp, "humi": data.Humi, "batt": data.Batt, "name": dName}, time.Now())
+				map[string]string{"type": "mijia", "source": hs, "alias": dAlias},
+				map[string]interface{}{"rssi": data.RSSI, "temp": data.Temp, "humi": data.Humi, "batt": data.Batt}, time.Now())
 			cnt++
-			err := writeAPI.WritePoint(context.Background(), p)
-			if err != nil {
-				log.Println("influxSender: Error TX :", err)
+
+			if !dryRun {
+				err := writeAPI.WritePoint(context.Background(), p)
+				if err != nil {
+					log.Println("influxSender: Error TX :", err)
+				}
+			} else {
+				log.Println("influxSender: Dry-run mode, will not send data.")
 			}
 			lockMetrics.Lock()
 			delete(metrics, mac)
@@ -253,6 +256,7 @@ func parseConfig(path string) error {
 		return err
 	}
 
+	println("%v", config)
 	config.debugLevel, err = cfg.Section("").Key("debuglevel").Int()
 	if err != nil {
 		println("Error parsing debugLevel")
@@ -274,11 +278,20 @@ func parseConfig(path string) error {
 		return err
 	}
 
+	config.mapping = cfg.Section("mapping").KeysHash()
+
+	for k, v := range config.mapping {
+		fmt.Println("Mapping :", k, "=>", v)
+	}
+
 	return nil
 }
 
 // MAIN
 func main() {
+
+	config = &Configuration{}
+	config.mapping = make(map[string]string)
 
 	log.Println("Starting ble2influx")
 
